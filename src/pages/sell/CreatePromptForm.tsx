@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWallet } from "@/hooks/useWallet";
+import { useNetworkGuard } from "@/hooks/useNetworkGuard";
 import { unlockPublicKey } from "@/lib/env";
 import {
   encryptPromptPlaintext,
@@ -25,10 +26,7 @@ import {
 import { browserStellarConfig } from "@/lib/stellar/browserConfig";
 import { xlmToStroops } from "@/lib/stellar/format";
 import { createPrompt } from "@/lib/stellar/promptHashClient";
-import {
-  LISTING_LIMITS,
-  validateListingForm,
-} from "@/lib/validation/listing";
+import { LISTING_LIMITS, validateListingForm } from "@/lib/validation/listing";
 
 const limits = {
   ...LISTING_LIMITS,
@@ -67,6 +65,7 @@ const createEmptyFormData = (): FormData => ({
 export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
   const navigate = useNavigate();
   const { address, signTransaction } = useWallet();
+  const networkGuard = useNetworkGuard();
   const draftStorageKey = address ? `${DRAFT_STORAGE_PREFIX}${address}` : null;
   const draftLoadRef = useRef<string | null>(null);
   const skipNextAutosaveRef = useRef(false);
@@ -83,9 +82,9 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
     () =>
       Boolean(
         address &&
-          signTransaction &&
-          browserStellarConfig.promptHashContractId &&
-          unlockPublicKey,
+        signTransaction &&
+        browserStellarConfig.promptHashContractId &&
+        unlockPublicKey,
       ),
     [address, signTransaction],
   );
@@ -146,7 +145,11 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
   }, [draftStorageKey]);
 
   useEffect(() => {
-    if (!draftStorageKey || draftLoadRef.current !== draftStorageKey || isSubmitting) {
+    if (
+      !draftStorageKey ||
+      draftLoadRef.current !== draftStorageKey ||
+      isSubmitting
+    ) {
       return;
     }
 
@@ -228,7 +231,10 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
     setIsSubmitting(true);
     try {
       const encrypted = await encryptPromptPlaintext(formData.fullPrompt);
-      const wrappedKey = await wrapPromptKey(encrypted.keyBytes, unlockPublicKey);
+      const wrappedKey = await wrapPromptKey(
+        encrypted.keyBytes,
+        unlockPublicKey,
+      );
 
       if (encrypted.encryptedPrompt.length > limits.encrypted) {
         throw new Error(
@@ -278,8 +284,8 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
     <div className="space-y-6">
       {!isConfigured ? (
         <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          Connect your wallet and configure `PUBLIC_PROMPT_HASH_CONTRACT_ID` plus
-          `PUBLIC_UNLOCK_PUBLIC_KEY` before listing prompts.
+          Connect your wallet and configure `PUBLIC_PROMPT_HASH_CONTRACT_ID`
+          plus `PUBLIC_UNLOCK_PUBLIC_KEY` before listing prompts.
         </div>
       ) : null}
 
@@ -358,7 +364,10 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
           <label htmlFor="category" className="text-sm font-medium">
             Category
           </label>
-          <Select value={formData.category} onValueChange={handleCategoryChange}>
+          <Select
+            value={formData.category}
+            onValueChange={handleCategoryChange}
+          >
             <SelectTrigger
               id="category"
               className={errors.category ? "border-red-500" : ""}
@@ -433,11 +442,15 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-medium">
-                {draftRestored ? "Recovered local draft." : "Draft saved locally."}
+                {draftRestored
+                  ? "Recovered local draft."
+                  : "Draft saved locally."}
               </p>
               <p className="text-xs text-cyan-100/80">
                 Stored only on this device and cleared after publish or discard.
-                {lastSavedAt ? ` Last saved ${new Date(lastSavedAt).toLocaleString()}.` : ""}
+                {lastSavedAt
+                  ? ` Last saved ${new Date(lastSavedAt).toLocaleString()}.`
+                  : ""}
               </p>
             </div>
             <Button
@@ -459,7 +472,11 @@ export function CreatePromptForm({ onCreated }: CreatePromptFormProps) {
 
       <Button
         className="w-full bg-emerald-400 text-slate-950 hover:bg-emerald-300"
-        disabled={isSubmitting || (showChecklist && checklistHasFailures)}
+        disabled={
+          isSubmitting ||
+          (showChecklist && checklistHasFailures) ||
+          !networkGuard.isCorrectNetwork
+        }
         onClick={handleSubmit}
       >
         {isSubmitting ? (

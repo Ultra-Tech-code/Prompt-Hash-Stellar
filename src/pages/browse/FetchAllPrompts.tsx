@@ -27,14 +27,16 @@ import {
 import { stroopsToXlmString } from "@/lib/stellar/format";
 import { PromptCard } from "./PromptCard";
 import { PromptModal } from "./PromptModal";
+import { EmptyState } from "@/components/EmptyState";
+import { invalidateAllPromptQueries } from "@/hooks/useContractSync";
 
 const ITEMS_PER_PAGE = 9;
 const ENABLE_INFINITE_SCROLL = true;
 
 const isMarketplaceConfigured = Boolean(
   browserStellarConfig.promptHashContractId &&
-    browserStellarConfig.simulationAccount &&
-    browserStellarConfig.rpcUrl,
+  browserStellarConfig.simulationAccount &&
+  browserStellarConfig.rpcUrl,
 );
 
 const parseXlmNumber = (value: bigint) => Number(stroopsToXlmString(value));
@@ -109,7 +111,7 @@ const FetchAllPrompts = ({
           setCurrentPage((prev) => prev + 1);
         }
       },
-      { threshold: 0.1, rootMargin: "100px" }
+      { threshold: 0.1, rootMargin: "100px" },
     );
 
     observer.observe(loadMoreRef.current);
@@ -193,7 +195,7 @@ const FetchAllPrompts = ({
     1,
     Math.ceil(filteredPrompts.length / ITEMS_PER_PAGE),
   );
-  
+
   // For infinite scroll, show all items up to current page
   const currentPrompts = ENABLE_INFINITE_SCROLL
     ? filteredPrompts.slice(0, currentPage * ITEMS_PER_PAGE)
@@ -249,18 +251,11 @@ const FetchAllPrompts = ({
       )}
 
       {filteredPrompts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="p-4 rounded-full bg-slate-900 border border-white/5">
-            <PackageSearch className="h-8 w-8 text-slate-500" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-semibold">No prompts found</h3>
-            <p className="text-slate-500 max-w-[280px]">
-              Try adjusting your filters or search terms to find what you're
-              looking for.
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          icon={<PackageSearch className="h-8 w-8" />}
+          title="No prompts found"
+          description="Try adjusting your filters or search terms to find what you're looking for."
+        />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-3">
@@ -291,14 +286,22 @@ const FetchAllPrompts = ({
           )}
 
           {/* Show count indicator for infinite scroll */}
-          {ENABLE_INFINITE_SCROLL && filteredPrompts.length > ITEMS_PER_PAGE && (
-            <div className="mt-8 text-center">
-              <p className="text-sm text-slate-500">
-                Showing <span className="text-white font-semibold">{currentPrompts.length}</span> of{" "}
-                <span className="text-white font-semibold">{filteredPrompts.length}</span> prompts
-              </p>
-            </div>
-          )}
+          {ENABLE_INFINITE_SCROLL &&
+            filteredPrompts.length > ITEMS_PER_PAGE && (
+              <div className="mt-8 text-center">
+                <p className="text-sm text-slate-500">
+                  Showing{" "}
+                  <span className="text-white font-semibold">
+                    {currentPrompts.length}
+                  </span>{" "}
+                  of{" "}
+                  <span className="text-white font-semibold">
+                    {filteredPrompts.length}
+                  </span>{" "}
+                  prompts
+                </p>
+              </div>
+            )}
         </>
       )}
 

@@ -2,10 +2,9 @@ import React from "react";
 import { Icon } from "@stellar/design-system";
 import { useWallet } from "../hooks/useWallet";
 import { stellarNetwork } from "../lib/env";
+import { AlertTriangle } from "lucide-react";
 
-// Format network name with first letter capitalized
 const formatNetworkName = (name: string) =>
-  // TODO: This is a workaround until @creit-tech/stellar-wallets-kit uses the new name for a local network.
   name === "STANDALONE"
     ? "Local"
     : name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
@@ -18,18 +17,19 @@ const textColor = "#4A5362";
 const NetworkPill: React.FC = () => {
   const { network, address } = useWallet();
 
-  // Check if there's a network mismatch
   const walletNetwork = formatNetworkName(network ?? "");
   const isNetworkMismatch = walletNetwork !== appNetwork;
 
   let title = "";
   let color = "#2ED06E";
+  let showWarning = false;
   if (!address) {
     title = "Connect your wallet using this network.";
     color = "#C1C7D0";
   } else if (isNetworkMismatch) {
-    title = `Wallet is on ${walletNetwork}, connect to ${appNetwork} instead.`;
+    title = `Wallet is on ${walletNetwork}, switch to ${appNetwork} in your wallet extension.`;
     color = "#FF3B30";
+    showWarning = true;
   }
 
   return (
@@ -47,8 +47,14 @@ const NetworkPill: React.FC = () => {
         cursor: isNetworkMismatch ? "help" : "default",
       }}
       title={title}
+      role="status"
+      aria-label={title}
     >
-      <Icon.Circle color={color} />
+      {showWarning ? (
+        <AlertTriangle className="h-3 w-3 shrink-0" style={{ color }} />
+      ) : (
+        <Icon.Circle color={color} />
+      )}
       {appNetwork}
     </div>
   );

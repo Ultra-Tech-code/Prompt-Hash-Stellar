@@ -8,10 +8,23 @@ import { webhookRouter } from "./routes/webhookRoutes";
 import { versioningRouter } from "./routes/versioningRoutes";
 import { governanceRouter } from "./routes/governanceRoutes"; // Issue #113
 import { runBackup, getBackupHealth } from "./services/backupService";
+import { validateEnv } from "./env";
 
 const app = express();
 
 const port = 5000;
+
+// Validate required environment variables at startup
+const envErrors = validateEnv();
+if (envErrors.length > 0) {
+  console.error("\n[env] Server configuration errors:");
+  for (const err of envErrors) {
+    console.error(`  MISSING: ${err}`);
+  }
+  console.error(
+    "[env] Server will start in degraded mode. Some features may not work.\n",
+  );
+}
 
 app.use(express.json());
 
@@ -33,6 +46,7 @@ app.get("/health", async (req, res) => {
   ]);
   res.json({
     status: "ok",
+    config: envErrors.length === 0 ? "configured" : "degraded",
     indexer: {
       lastProcessedLedger: state?.lastIndexedLedger || 0,
       timestamp: new Date(),

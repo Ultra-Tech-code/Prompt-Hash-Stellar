@@ -5,19 +5,34 @@ import { metrics } from "../../src/lib/observability/metrics";
 import { recordAuditEvent } from "../../server/src/services/auditTrail";
 import { apiError, ErrorCode } from "../../src/lib/api/errorCodes";
 
+// Validate required secrets at module load time (fast fail)
+const _challengeSecret = process.env.CHALLENGE_TOKEN_SECRET;
+if (!_challengeSecret) {
+  console.error(
+    "[challenge] CHALLENGE_TOKEN_SECRET is not configured. Challenge issuance will fail.",
+  );
+}
+
 async function handler(req: any, res: any) {
   if (req.method !== "POST") {
-    res.status(405).json(apiError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed."));
+    res
+      .status(405)
+      .json(apiError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed."));
     return;
   }
 
-  const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress) as string;
+  const clientIp = (req.headers["x-forwarded-for"] ||
+    req.socket.remoteAddress) as string;
   const { address, promptId } = req.body ?? {};
 
   // Authenticated if wallet address is provided in the request body.
   const isAuthenticated = Boolean(address);
 
-  const rateLimit = await checkRateLimit("challenge", clientIp, isAuthenticated);
+  const rateLimit = await checkRateLimit(
+    "challenge",
+    clientIp,
+    isAuthenticated,
+  );
 
   if (!rateLimit.success) {
     req.logger.warn({ clientIp }, "Rate limit exceeded for challenge issuance");
@@ -35,9 +50,13 @@ async function handler(req: any, res: any) {
     res.setHeader("X-RateLimit-Remaining", 0);
     res.setHeader("X-RateLimit-Reset", rateLimit.reset);
     res.status(429).json(
-      apiError(ErrorCode.RATE_LIMIT_IP, "Too many requests. Please try again later.", {
-        reset: rateLimit.reset,
-      }),
+      apiError(
+        ErrorCode.RATE_LIMIT_IP,
+        "Too many requests. Please try again later.",
+        {
+          reset: rateLimit.reset,
+        },
+      ),
     );
     return;
   }
@@ -49,18 +68,29 @@ async function handler(req: any, res: any) {
   const secret = process.env.CHALLENGE_TOKEN_SECRET;
   if (!secret) {
     req.logger.error("CHALLENGE_TOKEN_SECRET is not configured.");
-    res.status(500).json(apiError(ErrorCode.CONFIGURATION_ERROR, "Configuration error."));
+    res
+      .status(500)
+      .json(apiError(ErrorCode.CONFIGURATION_ERROR, "Configuration error."));
     return;
   }
 
   if (!address || !promptId) {
-    res.status(400).json(
-      apiError(ErrorCode.MISSING_FIELDS, "address and promptId are required."),
-    );
+    res
+      .status(400)
+      .json(
+        apiError(
+          ErrorCode.MISSING_FIELDS,
+          "address and promptId are required.",
+        ),
+      );
     return;
   }
 
-  const challenge = createChallengeToken(secret, String(address), String(promptId));
+  const challenge = createChallengeToken(
+    secret,
+    String(address),
+    String(promptId),
+  );
 
   metrics.trackChallengeIssued(String(address), String(promptId));
   req.logger.info({ address, promptId }, "Challenge token issued successfully");

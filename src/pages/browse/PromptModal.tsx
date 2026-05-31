@@ -6,15 +6,16 @@ import { unlockPrompt } from "../../lib/prompts/unlock";
 import { Skeleton } from "../../components/Skeleton";
 import { StatusBanner } from "../../components/StatusBanner";
 import { UnlockExplainer } from "../../components/UnlockExplainer";
+import { TransactionTimeline } from "../../components/TransactionTimeline";
+import { useNetworkGuard } from "../../hooks/useNetworkGuard";
 import {
   CheckCircle,
-  Loader2,
-  LockKeyhole,
   X,
   ExternalLink,
   ShieldCheck,
   Wallet,
   MessageSquare,
+  AlertTriangle,
 } from "lucide-react";
 import { ReviewForm } from "../../components/prompts/ReviewForm";
 import { ReviewList } from "../../components/prompts/ReviewList";
@@ -46,6 +47,7 @@ export const PromptModal: React.FC<PromptModalProps> = ({
 }) => {
   const wallet = useContext(WalletContext);
   const queryClient = useQueryClient();
+  const networkGuard = useNetworkGuard();
 
   const [status, setStatus] = useState<BuyerStatus>("IDLE");
   const [txHash, setTxHash] = useState<string>("");
@@ -89,8 +91,14 @@ export const PromptModal: React.FC<PromptModalProps> = ({
     error: unlockError,
   } = useAsyncTransaction(
     async (hash: string) => {
-      if (!wallet?.signMessage || !wallet.address) throw new Error("Wallet not connected");
-      return await unlockPrompt(itemId, hash, wallet.signMessage, wallet.address);
+      if (!wallet?.signMessage || !wallet.address)
+        throw new Error("Wallet not connected");
+      return await unlockPrompt(
+        itemId,
+        hash,
+        wallet.signMessage,
+        wallet.address,
+      );
     },
     {
       onOptimistic: () => setStatus("UNLOCKING"),
@@ -150,7 +158,10 @@ export const PromptModal: React.FC<PromptModalProps> = ({
 
         <div className="p-5 sm:p-8">
           <div className="mb-6 sm:mb-8">
-            <h2 id="prompt-modal-title" className="mb-2 text-2xl font-bold text-white">
+            <h2
+              id="prompt-modal-title"
+              className="mb-2 text-2xl font-bold text-white"
+            >
               Acquire License
             </h2>
             <p id="prompt-modal-description" className="text-sm text-slate-400">
@@ -166,6 +177,19 @@ export const PromptModal: React.FC<PromptModalProps> = ({
             </div>
           ) : (
             <div className="space-y-6">
+              {/* Network mismatch guard */}
+              {networkGuard.guardSeverity === "error" && (
+                <div className="p-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 flex gap-3 items-start">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-amber-200">
+                    <p className="font-semibold">Network mismatch</p>
+                    <p className="text-xs text-amber-300/80 mt-1">
+                      {networkGuard.guardMessage}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* TRANSACTION STAGES */}
               {(status === "IDLE" || status === "ERROR") && (
                 <div className="space-y-6">
@@ -191,8 +215,10 @@ export const PromptModal: React.FC<PromptModalProps> = ({
 
                   <button
                     onClick={() => runPurchase()}
-                    disabled={isPurchasing}
-                    className="group w-full h-14 bg-white text-slate-950 hover:bg-emerald-400 font-black rounded-2xl transition-all flex items-center justify-center gap-2"
+                    disabled={
+                      isPurchasing || networkGuard.guardSeverity === "error"
+                    }
+                    className="group w-full h-14 bg-white text-slate-950 hover:bg-emerald-400 font-black rounded-2xl transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Confirm & Purchase <Wallet className="w-4 h-4" />
                   </button>
@@ -200,29 +226,60 @@ export const PromptModal: React.FC<PromptModalProps> = ({
               )}
 
               {status === "AWAITING_APPROVAL" && (
-                <div className="flex flex-col items-center justify-center py-12 space-y-6 text-center">
-                  <div className="relative">
-                    <Loader2 className="w-12 h-12 text-emerald-500 animate-spin" />
-                    <div className="absolute inset-0 blur-xl bg-emerald-500/20" />
-                  </div>
-                  <p className="text-slate-200 font-bold text-lg italic tracking-tight">
-                    Confirming in Wallet...
-                  </p>
+                <div className="py-6">
+                  <TransactionTimeline
+                    steps={[
+                      {
+                        id: "approve",
+                        label: "Wallet approval",
+                        status: "active",
+                        description: "Confirm the transaction in your wallet",
+                      },
+                      {
+                        id: "submit",
+                        label: "Transaction submitted",
+                        status: "pending",
+                      },
+                      {
+                        id: "confirm",
+                        label: "Confirmation pending",
+                        status: "pending",
+                      },
+                      { id: "complete", label: "Completed", status: "pending" },
+                    ]}
+                  />
                 </div>
               )}
 
               {status === "CONFIRMING" && (
-                <div className="py-6 text-center">
-                  <StatusBanner
-                    status="pending"
-                    message="Broadcasting to Stellar..."
+                <div className="py-6">
+                  <TransactionTimeline
+                    steps={[
+                      {
+                        id: "approve",
+                        label: "Wallet approval",
+                        status: "completed",
+                      },
+                      {
+                        id: "submit",
+                        label: "Transaction submitted",
+                        status: "active",
+                        description: "Broadcasting to Stellar...",
+                      },
+                      {
+                        id: "confirm",
+                        label: "Confirmation pending",
+                        status: "pending",
+                      },
+                      { id: "complete", label: "Completed", status: "pending" },
+                    ]}
                   />
                   {txHash && (
                     <a
                       href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-2 mt-6 text-xs text-slate-500 hover:text-emerald-400 font-mono transition-colors"
+                      className="inline-flex items-center gap-2 mt-4 text-xs text-slate-500 hover:text-emerald-400 font-mono transition-colors"
                     >
                       View Transaction <ExternalLink className="h-3 w-3" />
                     </a>
@@ -232,18 +289,40 @@ export const PromptModal: React.FC<PromptModalProps> = ({
 
               {status === "PURCHASED_LOCKED" && (
                 <div className="space-y-6">
-                  <div className="p-6 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col items-center text-center">
-                    <LockKeyhole className="w-8 h-8 text-emerald-400 mb-3" />
-                    <h4 className="font-bold text-white">License Verified</h4>
-                    <p className="text-xs text-slate-400 mt-2">
-                      Ownership detected on-chain. Sign the unlock request to
-                      decrypt.
-                    </p>
-                  </div>
+                  <TransactionTimeline
+                    steps={[
+                      {
+                        id: "approve",
+                        label: "Wallet approval",
+                        status: "completed",
+                      },
+                      {
+                        id: "submit",
+                        label: "Transaction submitted",
+                        status: "completed",
+                      },
+                      {
+                        id: "confirm",
+                        label: "Confirmation pending",
+                        status: "completed",
+                      },
+                      {
+                        id: "unlock",
+                        label: "Unlocking content",
+                        status: "active",
+                        description: "Sign with your wallet to decrypt",
+                      },
+                    ]}
+                  />
 
-                  {/* Explain what the signature does — always visible before and during signing */}
                   <UnlockExplainer
-                    state="signing"
+                    state={
+                      isUnlocking
+                        ? "signing"
+                        : unlockError
+                          ? "failed"
+                          : "signing"
+                    }
                     onRetry={
                       unlockError
                         ? () => runUnlock(txHash || "existing")
@@ -270,6 +349,32 @@ export const PromptModal: React.FC<PromptModalProps> = ({
 
               {status === "SUCCESS" && (
                 <div className="animate-in fade-in zoom-in duration-300">
+                  <div className="pb-4">
+                    <TransactionTimeline
+                      steps={[
+                        {
+                          id: "approve",
+                          label: "Wallet approval",
+                          status: "completed",
+                        },
+                        {
+                          id: "submit",
+                          label: "Transaction submitted",
+                          status: "completed",
+                        },
+                        {
+                          id: "confirm",
+                          label: "Confirmation pending",
+                          status: "completed",
+                        },
+                        {
+                          id: "unlock",
+                          label: "Content decrypted",
+                          status: "completed",
+                        },
+                      ]}
+                    />
+                  </div>
                   <div className="flex items-center gap-2 text-emerald-400 font-bold mb-4">
                     <CheckCircle className="h-5 w-5" /> Access Granted
                   </div>
@@ -295,7 +400,9 @@ export const PromptModal: React.FC<PromptModalProps> = ({
                         </button>
                       ) : (
                         <div className="space-y-4">
-                          <h4 className="text-sm font-bold text-white">Share Your Experience</h4>
+                          <h4 className="text-sm font-bold text-white">
+                            Share Your Experience
+                          </h4>
                           <ReviewForm
                             promptId={itemId}
                             onSubmit={async (review) => {
@@ -303,10 +410,14 @@ export const PromptModal: React.FC<PromptModalProps> = ({
                                 itemId,
                                 wallet.address!,
                                 review.rating,
-                                review.text
+                                review.text,
                               );
-                              queryClient.invalidateQueries({ queryKey: ["reviews", itemId] });
-                              queryClient.invalidateQueries({ queryKey: ["review-stats", itemId] });
+                              queryClient.invalidateQueries({
+                                queryKey: ["reviews", itemId],
+                              });
+                              queryClient.invalidateQueries({
+                                queryKey: ["review-stats", itemId],
+                              });
                               setShowReviewForm(false);
                             }}
                             onCancel={() => setShowReviewForm(false)}
@@ -348,7 +459,10 @@ export const PromptModal: React.FC<PromptModalProps> = ({
                 )}
               </div>
             </div>
-            <ReviewList reviews={reviewData.reviews} isLoading={reviewsLoading} />
+            <ReviewList
+              reviews={reviewData.reviews}
+              isLoading={reviewsLoading}
+            />
           </div>
         )}
       </div>

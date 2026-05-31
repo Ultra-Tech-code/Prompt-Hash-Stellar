@@ -21,31 +21,45 @@ import { dispatchEvent } from "../../server/src/services/webhookDispatcher";
 import { recordAuditEvent } from "../../server/src/services/auditTrail";
 import { apiError, ErrorCode } from "../../src/lib/api/errorCodes";
 
+// Validate required secrets at module load time (fast fail)
+const _requiredSecrets = [
+  "CHALLENGE_TOKEN_SECRET",
+  "UNLOCK_PUBLIC_KEY",
+  "UNLOCK_PRIVATE_KEY",
+];
+for (const key of _requiredSecrets) {
+  if (!process.env[key]) {
+    console.error(
+      `[unlock] ${key} is not configured. Unlock requests will fail.`,
+    );
+  }
+}
+
 /**
  * Get active secrets for token verification
  * Supports multiple secrets during rotation grace period
  */
 function getActiveSecrets(primarySecret: string): string[] {
   const secrets = [primarySecret];
-  
+
   // Check for previous secret within grace period
   const previousSecret = process.env.CHALLENGE_TOKEN_SECRET_PREVIOUS;
   const rotationTimestamp = parseInt(
     process.env.CHALLENGE_TOKEN_ROTATION_TIMESTAMP || "0",
-    10
+    10,
   );
   const gracePeriodMs = parseInt(
     process.env.CHALLENGE_TOKEN_GRACE_PERIOD_MS || "300000", // 5 minutes default
-    10
+    10,
   );
-  
+
   if (previousSecret && rotationTimestamp) {
     const timeSinceRotation = Date.now() - rotationTimestamp;
     if (timeSinceRotation < gracePeriodMs) {
       secrets.push(previousSecret);
     }
   }
-  
+
   return secrets;
 }
 
@@ -60,7 +74,9 @@ function getServerConfig(): PromptHashConfig {
     process.env.PUBLIC_STELLAR_NATIVE_ASSET_CONTRACT_ID ??
     "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
   const simulationAccount =
-    process.env.PUBLIC_STELLAR_SIMULATION_ACCOUNT ?? process.env.UNLOCK_PUBLIC_KEY ?? "";
+    process.env.PUBLIC_STELLAR_SIMULATION_ACCOUNT ??
+    process.env.UNLOCK_PUBLIC_KEY ??
+    "";
 
   return {
     rpcUrl,
@@ -74,11 +90,14 @@ function getServerConfig(): PromptHashConfig {
 
 async function handler(req: any, res: any) {
   if (req.method !== "POST") {
-    res.status(405).json(apiError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed."));
+    res
+      .status(405)
+      .json(apiError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed."));
     return;
   }
 
-  const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress) as string;
+  const clientIp = (req.headers["x-forwarded-for"] ||
+    req.socket.remoteAddress) as string;
   const { token, promptId, address, signedMessage } = req.body ?? {};
 
   // Authenticated bucket: wallet address is present.
@@ -102,16 +121,24 @@ async function handler(req: any, res: any) {
     res.setHeader("X-RateLimit-Remaining", 0);
     res.setHeader("X-RateLimit-Reset", ipRateLimit.reset);
     res.status(429).json(
-      apiError(ErrorCode.RATE_LIMIT_IP, "Too many requests. Please try again later.", {
-        reset: ipRateLimit.reset,
-      }),
+      apiError(
+        ErrorCode.RATE_LIMIT_IP,
+        "Too many requests. Please try again later.",
+        {
+          reset: ipRateLimit.reset,
+        },
+      ),
     );
     return;
   }
 
   // Rate limit by wallet address (authenticated bucket — per-wallet brute-force guard).
   if (address) {
-    const walletRateLimit = await checkRateLimit("unlock", String(address), isAuthenticated);
+    const walletRateLimit = await checkRateLimit(
+      "unlock",
+      String(address),
+      isAuthenticated,
+    );
     if (!walletRateLimit.success) {
       req.logger.warn({ address }, "Rate limit exceeded for unlock (Wallet)");
       metrics.trackRateLimitHit("unlock_wallet", String(address));
@@ -128,9 +155,13 @@ async function handler(req: any, res: any) {
       res.setHeader("X-RateLimit-Remaining", 0);
       res.setHeader("X-RateLimit-Reset", walletRateLimit.reset);
       res.status(429).json(
-        apiError(ErrorCode.RATE_LIMIT_WALLET, "Too many unlock attempts for this wallet.", {
-          reset: walletRateLimit.reset,
-        }),
+        apiError(
+          ErrorCode.RATE_LIMIT_WALLET,
+          "Too many unlock attempts for this wallet.",
+          {
+            reset: walletRateLimit.reset,
+          },
+        ),
       );
       return;
     }
@@ -142,24 +173,28 @@ async function handler(req: any, res: any) {
 
   if (!challengeSecret || !unlockPublicKey || !unlockPrivateKey) {
     req.logger.error("Unlock service is missing configuration secrets.");
-    res.status(500).json(apiError(ErrorCode.CONFIGURATION_ERROR, "Configuration error."));
+    res
+      .status(500)
+      .json(apiError(ErrorCode.CONFIGURATION_ERROR, "Configuration error."));
     return;
   }
 
   if (!token || !promptId || !address || !signedMessage) {
-    res.status(400).json(
-      apiError(
-        ErrorCode.MISSING_FIELDS,
-        "token, promptId, address, and signedMessage are required.",
-      ),
-    );
+    res
+      .status(400)
+      .json(
+        apiError(
+          ErrorCode.MISSING_FIELDS,
+          "token, promptId, address, and signedMessage are required.",
+        ),
+      );
     return;
   }
 
   try {
     // Support multiple active secrets during rotation grace period
     const activeSecrets = getActiveSecrets(challengeSecret);
-    
+
     const payload = verifyChallengeToken(
       activeSecrets,
       String(token),
@@ -175,7 +210,11 @@ async function handler(req: any, res: any) {
 
     if (!validSignature) {
       req.logger.warn({ address, promptId }, "Invalid wallet signature");
-      metrics.trackUnlockFailure(String(address), String(promptId), "invalid_signature");
+      metrics.trackUnlockFailure(
+        String(address),
+        String(promptId),
+        "invalid_signature",
+      );
       void recordAuditEvent({
         action: "unlock_invalid_signature",
         result: "failure",
@@ -185,7 +224,11 @@ async function handler(req: any, res: any) {
         clientIp,
         reason: "invalid_signature",
       });
-      res.status(401).json(apiError(ErrorCode.INVALID_SIGNATURE, "Invalid wallet signature."));
+      res
+        .status(401)
+        .json(
+          apiError(ErrorCode.INVALID_SIGNATURE, "Invalid wallet signature."),
+        );
       return;
     }
 
@@ -194,7 +237,11 @@ async function handler(req: any, res: any) {
     const access = await hasAccess(config, String(address), id);
     if (!access) {
       req.logger.warn({ address, promptId }, "Prompt access denied");
-      metrics.trackUnlockFailure(String(address), String(promptId), "no_access");
+      metrics.trackUnlockFailure(
+        String(address),
+        String(promptId),
+        "no_access",
+      );
       void recordAuditEvent({
         action: "unlock_no_access",
         result: "failure",
@@ -204,9 +251,14 @@ async function handler(req: any, res: any) {
         clientIp,
         reason: "no_access",
       });
-      res.status(403).json(
-        apiError(ErrorCode.ACCESS_NOT_PURCHASED, "Prompt access has not been purchased."),
-      );
+      res
+        .status(403)
+        .json(
+          apiError(
+            ErrorCode.ACCESS_NOT_PURCHASED,
+            "Prompt access has not been purchased.",
+          ),
+        );
       return;
     }
 
@@ -225,7 +277,11 @@ async function handler(req: any, res: any) {
     const storedHash = normalizeContentHash(prompt.contentHash);
     if (contentHash !== storedHash) {
       req.logger.error({ address, promptId }, "Prompt integrity check failed");
-      metrics.trackUnlockFailure(String(address), String(promptId), "integrity_failure");
+      metrics.trackUnlockFailure(
+        String(address),
+        String(promptId),
+        "integrity_failure",
+      );
       void recordAuditEvent({
         action: "unlock_integrity_failure",
         result: "failure",
@@ -235,9 +291,14 @@ async function handler(req: any, res: any) {
         clientIp,
         reason: "integrity_failure",
       });
-      res.status(500).json(
-        apiError(ErrorCode.INTEGRITY_FAILURE, "Prompt integrity check failed."),
-      );
+      res
+        .status(500)
+        .json(
+          apiError(
+            ErrorCode.INTEGRITY_FAILURE,
+            "Prompt integrity check failed.",
+          ),
+        );
       return;
     }
 
@@ -269,8 +330,12 @@ async function handler(req: any, res: any) {
       plaintext,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to unlock prompt.";
-    req.logger.error({ address, promptId, error: message }, "Unlock attempt failed");
+    const message =
+      error instanceof Error ? error.message : "Failed to unlock prompt.";
+    req.logger.error(
+      { address, promptId, error: message },
+      "Unlock attempt failed",
+    );
     metrics.trackUnlockFailure(String(address), String(promptId), "error");
 
     // Distinguish expired-challenge errors for finer-grained audit reasons and error codes.
@@ -286,13 +351,23 @@ async function handler(req: any, res: any) {
     });
 
     if (isExpired) {
-      res.status(400).json(
-        apiError(ErrorCode.CHALLENGE_EXPIRED, "The challenge token has expired. Please request a new one."),
-      );
+      res
+        .status(400)
+        .json(
+          apiError(
+            ErrorCode.CHALLENGE_EXPIRED,
+            "The challenge token has expired. Please request a new one.",
+          ),
+        );
     } else {
-      res.status(400).json(
-        apiError(ErrorCode.TEMPORARY_FAILURE, "Failed to unlock prompt. Please try again."),
-      );
+      res
+        .status(400)
+        .json(
+          apiError(
+            ErrorCode.TEMPORARY_FAILURE,
+            "Failed to unlock prompt. Please try again.",
+          ),
+        );
     }
   }
 }

@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Loader2, LockKeyhole } from "lucide-react";
+import { Eye, Loader2, LockKeyhole, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useWallet } from "@/hooks/useWallet";
+import { useNetworkGuard } from "@/hooks/useNetworkGuard";
 import { browserStellarConfig } from "@/lib/stellar/browserConfig";
 import {
   getPromptsByBuyer,
@@ -12,23 +13,25 @@ import {
   setPromptSaleStatus,
   updatePromptPrice,
 } from "@/lib/stellar/promptHashClient";
-import { formatPriceLabel, stroopsToXlmString, xlmToStroops } from "@/lib/stellar/format";
+import {
+  formatPriceLabel,
+  stroopsToXlmString,
+  xlmToStroops,
+} from "@/lib/stellar/format";
 import { unlockPromptContent } from "@/lib/prompts/unlock";
-
-const emptyState = (
-  <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-sm text-slate-300">
-    No prompts found yet.
-  </div>
-);
+import { EmptyState } from "@/components/EmptyState";
 
 const MyPrompts = () => {
   const queryClient = useQueryClient();
   const { address, signMessage, signTransaction } = useWallet();
+  const networkGuard = useNetworkGuard();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyPromptId, setBusyPromptId] = useState<string | null>(null);
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
-  const [unlockedPrompts, setUnlockedPrompts] = useState<Record<string, string>>({});
+  const [unlockedPrompts, setUnlockedPrompts] = useState<
+    Record<string, string>
+  >({});
 
   const createdQuery = useQuery({
     queryKey: ["created-prompts", address],
@@ -51,7 +54,8 @@ const MyPrompts = () => {
     return Object.fromEntries(
       createdPrompts.map((prompt) => [
         prompt.id.toString(),
-        priceDrafts[prompt.id.toString()] ?? stroopsToXlmString(prompt.priceStroops),
+        priceDrafts[prompt.id.toString()] ??
+          stroopsToXlmString(prompt.priceStroops),
       ]),
     );
   }, [createdPrompts, priceDrafts]);
@@ -93,7 +97,11 @@ const MyPrompts = () => {
       updateStatus(!active ? "Prompt reactivated." : "Prompt deactivated.");
       await refreshPromptLists();
     } catch (error) {
-      updateError(error instanceof Error ? error.message : "Failed to update sale status.");
+      updateError(
+        error instanceof Error
+          ? error.message
+          : "Failed to update sale status.",
+      );
     } finally {
       setBusyPromptId(null);
     }
@@ -118,7 +126,9 @@ const MyPrompts = () => {
       updateStatus("Prompt price updated.");
       await refreshPromptLists();
     } catch (error) {
-      updateError(error instanceof Error ? error.message : "Failed to update price.");
+      updateError(
+        error instanceof Error ? error.message : "Failed to update price.",
+      );
     } finally {
       setBusyPromptId(null);
     }
@@ -126,20 +136,28 @@ const MyPrompts = () => {
 
   const handleUnlock = async (promptId: bigint) => {
     if (!address || !signMessage) {
-      updateError("Connect a wallet with SEP-43 message signing to unlock prompts.");
+      updateError(
+        "Connect a wallet with SEP-43 message signing to unlock prompts.",
+      );
       return;
     }
 
     setBusyPromptId(promptId.toString());
     try {
-      const response = await unlockPromptContent(address, promptId, signMessage);
+      const response = await unlockPromptContent(
+        address,
+        promptId,
+        signMessage,
+      );
       setUnlockedPrompts((current) => ({
         ...current,
         [promptId.toString()]: response.plaintext,
       }));
       updateStatus("Prompt unlocked.");
     } catch (error) {
-      updateError(error instanceof Error ? error.message : "Failed to unlock prompt.");
+      updateError(
+        error instanceof Error ? error.message : "Failed to unlock prompt.",
+      );
     } finally {
       setBusyPromptId(null);
     }
@@ -147,9 +165,21 @@ const MyPrompts = () => {
 
   if (!address) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-sm text-slate-300">
-        Connect your Stellar wallet to manage created and purchased prompts.
-      </div>
+      <EmptyState
+        icon={<PackageOpen className="h-7 w-7" />}
+        title="Wallet not connected"
+        description="Connect your Stellar wallet to manage created and purchased prompts."
+      />
+    );
+  }
+
+  if (!networkGuard.isCorrectNetwork) {
+    return (
+      <EmptyState
+        icon={<PackageOpen className="h-7 w-7" />}
+        title="Wrong network"
+        description={networkGuard.guardMessage ?? ""}
+      />
     );
   }
 
@@ -170,16 +200,30 @@ const MyPrompts = () => {
         <div>
           <h2 className="text-2xl font-semibold text-white">Created by me</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Update pricing, pause listings, and track license sales without changing ownership.
+            Update pricing, pause listings, and track license sales without
+            changing ownership.
           </p>
         </div>
 
         {createdQuery.isLoading ? (
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-sm text-slate-300">
-            Loading created prompts...
+          <div className="grid gap-6 xl:grid-cols-2">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i} className="border-white/10 bg-slate-950/70">
+                <div className="aspect-video animate-pulse bg-slate-800/50 rounded-t-xl" />
+                <CardContent className="p-5 space-y-4">
+                  <div className="h-4 w-24 animate-pulse rounded bg-slate-800/50" />
+                  <div className="h-6 w-48 animate-pulse rounded bg-slate-800/50" />
+                  <div className="h-4 w-full animate-pulse rounded bg-slate-800/50" />
+                </CardContent>
+              </Card>
+            ))}
           </div>
         ) : createdPrompts.length === 0 ? (
-          emptyState
+          <EmptyState
+            icon={<PackageOpen className="h-7 w-7" />}
+            title="No prompts created yet"
+            description="Create your first prompt listing to start selling licenses."
+          />
         ) : (
           <div className="grid gap-6 xl:grid-cols-2">
             {createdPrompts.map((prompt) => (
@@ -199,7 +243,9 @@ const MyPrompts = () => {
                     <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
                       {prompt.category}
                     </p>
-                    <h3 className="mt-2 text-xl font-semibold">{prompt.title}</h3>
+                    <h3 className="mt-2 text-xl font-semibold">
+                      {prompt.title}
+                    </h3>
                     <p className="mt-3 text-sm leading-6 text-slate-300">
                       {prompt.previewText}
                     </p>
@@ -254,7 +300,9 @@ const MyPrompts = () => {
                   <Button
                     variant="outline"
                     className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
-                    onClick={() => void handleToggleSaleStatus(prompt.id, prompt.active)}
+                    onClick={() =>
+                      void handleToggleSaleStatus(prompt.id, prompt.active)
+                    }
                     disabled={busyPromptId === prompt.id.toString()}
                   >
                     {prompt.active ? "Set inactive" : "Reactivate"}
@@ -270,16 +318,29 @@ const MyPrompts = () => {
         <div>
           <h2 className="text-2xl font-semibold text-white">Purchased by me</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Unlock purchased prompt text on demand. Access remains available for future sessions.
+            Unlock purchased prompt text on demand. Access remains available for
+            future sessions.
           </p>
         </div>
 
         {purchasedQuery.isLoading ? (
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-sm text-slate-300">
-            Loading purchased prompts...
+          <div className="grid gap-6 xl:grid-cols-2">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i} className="border-white/10 bg-slate-950/70">
+                <CardContent className="p-5 space-y-4">
+                  <div className="h-4 w-24 animate-pulse rounded bg-slate-800/50" />
+                  <div className="h-6 w-48 animate-pulse rounded bg-slate-800/50" />
+                  <div className="h-4 w-full animate-pulse rounded bg-slate-800/50" />
+                </CardContent>
+              </Card>
+            ))}
           </div>
         ) : purchasedPrompts.length === 0 ? (
-          emptyState
+          <EmptyState
+            icon={<PackageOpen className="h-7 w-7" />}
+            title="No purchases yet"
+            description="Prompts you purchase will appear here."
+          />
         ) : (
           <div className="grid gap-6 xl:grid-cols-2">
             {purchasedPrompts.map((prompt) => (
@@ -293,7 +354,9 @@ const MyPrompts = () => {
                       <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
                         {prompt.category}
                       </p>
-                      <h3 className="mt-2 text-xl font-semibold">{prompt.title}</h3>
+                      <h3 className="mt-2 text-xl font-semibold">
+                        {prompt.title}
+                      </h3>
                     </div>
                     <div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm">
                       {formatPriceLabel(prompt.priceStroops)}
@@ -337,7 +400,8 @@ const MyPrompts = () => {
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
-                      Unlocked plaintext appears here after the access check succeeds.
+                      Unlocked plaintext appears here after the access check
+                      succeeds.
                     </div>
                   )}
                 </CardContent>

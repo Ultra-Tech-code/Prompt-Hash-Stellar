@@ -1,87 +1,30 @@
-import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookOpenCheck,
   Eye,
   Loader2,
   LockKeyhole,
-  PlugZap,
-  RefreshCw,
   ShieldCheck,
   ShoppingBag,
-  WifiOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useWallet";
 import { browserStellarConfig } from "@/lib/stellar/browserConfig";
-import { getPromptsByBuyer, type PromptRecord } from "@/lib/stellar/promptHashClient";
+import {
+  getPromptsByBuyer,
+  type PromptRecord,
+} from "@/lib/stellar/promptHashClient";
 import { formatPriceLabel } from "@/lib/stellar/format";
 import { unlockPromptContent } from "@/lib/prompts/unlock";
-import { UnlockExplainer, type UnlockState } from "@/components/UnlockExplainer";
-import { stellarNetwork } from "@/lib/env";
-
-const EXPECTED_NETWORK = stellarNetwork;
-
-function EmptyLibrary() {
-  return (
-    <div className="grid min-h-64 place-items-center rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
-      <div className="max-w-xs">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-200/10 text-cyan-100">
-          <BookOpenCheck className="h-7 w-7" />
-        </div>
-        <h3 className="mt-4 text-lg font-semibold text-white">No purchases yet</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          Prompts you purchase will appear here with a direct unlock path to the
-          decrypted content.
-        </p>
-        <Button asChild className="mt-5 h-9 bg-cyan-200 text-slate-950 hover:bg-cyan-100 px-5">
-          <Link to="/browse">
-            <ShoppingBag className="h-4 w-4" />
-            Browse marketplace
-          </Link>
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function DisconnectedState() {
-  return (
-    <div className="grid min-h-64 place-items-center rounded-xl border border-white/10 bg-white/[0.02] p-8 text-center">
-      <div className="max-w-xs">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-700/50 text-slate-400">
-          <PlugZap className="h-7 w-7" />
-        </div>
-        <h3 className="mt-4 text-lg font-semibold text-white">Wallet not connected</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          Connect your Stellar wallet to view prompts you have purchased.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function WrongNetworkState({ network }: { network?: string }) {
-  return (
-    <div className="grid min-h-64 place-items-center rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-8 text-center">
-      <div className="max-w-xs">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-300/10 text-amber-200">
-          <WifiOff className="h-7 w-7" />
-        </div>
-        <h3 className="mt-4 text-lg font-semibold text-white">Wrong network</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          You are connected to{" "}
-          <span className="font-semibold text-amber-200">{network ?? "an unknown network"}</span>.
-          Switch to{" "}
-          <span className="font-semibold text-white">{EXPECTED_NETWORK}</span> to
-          view your library.
-        </p>
-      </div>
-    </div>
-  );
-}
+import {
+  UnlockExplainer,
+  type UnlockState,
+} from "@/components/UnlockExplainer";
+import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
+import { useNetworkGuard } from "@/hooks/useNetworkGuard";
 
 function PromptLibraryCard({
   prompt,
@@ -176,7 +119,9 @@ function PromptLibraryCard({
         <Button
           className="h-9 bg-cyan-200 text-slate-950 hover:bg-cyan-100 disabled:opacity-50 text-xs font-bold"
           onClick={onUnlock}
-          disabled={isBusy || unlockState === "signing" || unlockState === "verifying"}
+          disabled={
+            isBusy || unlockState === "signing" || unlockState === "verifying"
+          }
         >
           {isBusy ? (
             <>
@@ -201,21 +146,24 @@ function PromptLibraryCard({
 }
 
 export function BuyerLibrary() {
-  const { address, network, signMessage } = useWallet();
+  const { address, signMessage } = useWallet();
+  const networkGuard = useNetworkGuard();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [unlocked, setUnlocked] = useState<Record<string, string>>({});
-  const [unlockStates, setUnlockStates] = useState<Record<string, UnlockState>>({});
+  const [unlockStates, setUnlockStates] = useState<Record<string, UnlockState>>(
+    {},
+  );
 
-  const isWrongNetwork =
-    Boolean(address) &&
-    Boolean(network) &&
-    network?.toLowerCase() !== EXPECTED_NETWORK.toLowerCase();
-
-  const { data: prompts = [], isLoading, isError, refetch } = useQuery({
+  const {
+    data: prompts = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ["buyer-library", address],
     queryFn: () =>
       address ? getPromptsByBuyer(browserStellarConfig, address) : [],
-    enabled: Boolean(address) && !isWrongNetwork,
+    enabled: Boolean(address) && networkGuard.isCorrectNetwork,
   });
 
   const setUnlockState = (id: string, state: UnlockState) =>
@@ -232,7 +180,10 @@ export function BuyerLibrary() {
       setUnlocked((prev) => ({ ...prev, [id]: result.plaintext }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      if (msg.toLowerCase().includes("declined") || msg.toLowerCase().includes("rejected")) {
+      if (
+        msg.toLowerCase().includes("declined") ||
+        msg.toLowerCase().includes("rejected")
+      ) {
         setUnlockState(id, "rejected");
       } else if (msg.toLowerCase().includes("expired")) {
         setUnlockState(id, "expired");
@@ -244,8 +195,25 @@ export function BuyerLibrary() {
     }
   };
 
-  if (!address) return <DisconnectedState />;
-  if (isWrongNetwork) return <WrongNetworkState network={network} />;
+  if (!address) {
+    return (
+      <EmptyState
+        icon={<ShoppingBag className="h-7 w-7" />}
+        title="Wallet not connected"
+        description="Connect your Stellar wallet to view prompts you have purchased."
+      />
+    );
+  }
+
+  if (!networkGuard.isCorrectNetwork) {
+    return (
+      <EmptyState
+        icon={<ShoppingBag className="h-7 w-7" />}
+        title="Wrong network"
+        description={networkGuard.guardMessage ?? ""}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -262,29 +230,31 @@ export function BuyerLibrary() {
 
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-rose-400/20 bg-rose-400/[0.05] p-8 text-center gap-3">
-        <p className="text-sm font-medium text-rose-300">Failed to load library</p>
-        <p className="text-xs text-slate-400">
-          Could not read purchased prompts from the contract.
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void refetch()}
-          className="border border-white/10 text-slate-300 hover:bg-white/10 text-xs"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Retry
-        </Button>
-      </div>
+      <ErrorState
+        title="Failed to load library"
+        description="Could not read purchased prompts from the contract."
+        onRetry={() => void refetch()}
+      />
     );
   }
 
-  if (prompts.length === 0) return <EmptyLibrary />;
+  if (prompts.length === 0) {
+    return (
+      <EmptyState
+        icon={<BookOpenCheck className="h-7 w-7" />}
+        title="No purchases yet"
+        description="Prompts you purchase will appear here with a direct unlock path to the decrypted content."
+        action={{
+          label: "Browse marketplace",
+          onClick: () => (window.location.href = "/browse"),
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
-      {prompts.map((prompt) => {
+      {prompts.map((prompt: PromptRecord) => {
         const id = prompt.id.toString();
         return (
           <PromptLibraryCard
